@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>モーションレーサー</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #000;
+      color: #fff;
+      font-family: 'Courier New', monospace;
+      overflow: hidden;
+      height: 100vh;
+    }
+    
+    #gameCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #1a1a1a;
+      image-rendering: pixelated;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: crisp-edges;
+    }
+    
+    #pixelCanvas {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 180px;
+      height: 135px;
+      border: 3px solid #00ff00;
+      box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
+      z-index: 101;
+      image-rendering: pixelated;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: crisp-edges;
+    }
+    
+    #ui {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 100;
+      font-size: 20px;
+      text-shadow: 2px 2px 0 #000;
+      color: #00ff00;
+      font-weight: bold;
+    }
+    
+    #ui div {
+      margin-bottom: 8px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 8px 15px;
+      border: 2px solid #00ff00;
+      display: inline-block;
+    }
+    
+    #status {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.9);
+      padding: 15px 30px;
+      border: 3px solid #00ff00;
+      text-align: center;
+      color: #00ff00;
+      font-size: 16px;
+    }
+    
+    .control-btn {
+      position: absolute;
+      bottom: 20px;
+      padding: 15px 30px;
+      background: #00ff00;
+      border: 3px solid #00ff00;
+      color: #000;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 16px;
+      box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
+      transition: all 0.1s;
+      z-index: 100;
+      font-family: 'Courier New', monospace;
+    }
+    
+    .control-btn:hover {
+      background: #00cc00;
+      transform: scale(1.05);
+    }
+    
+    .control-btn:active {
+      transform: scale(0.95);
+    }
+    
+    #cameraBtn {
+      right: 20px;
+    }
+    
+    #startBtn {
+      left: 20px;
+    }
+    
+    #gameOver {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #000;
+      padding: 40px 60px;
+      border: 5px solid #ff0000;
+      text-align: center;
+      display: none;
+      z-index: 200;
+      box-shadow: 0 0 40px rgba(255, 0, 0, 0.8);
+    }
+    
+    #gameOver h2 {
+      font-size: 48px;
+      color: #ff0000;
+      margin-bottom: 20px;
+      text-shadow: 3px 3px 0 #000;
+    }
+    
+    #gameOver p {
+      font-size: 24px;
+      margin: 10px 0;
+      color: #00ff00;
+    }
+    
+    #restartBtn {
+      margin-top: 30px;
+      padding: 15px 40px;
+      background: #00ff00;
+      border: 3px solid #00ff00;
+      color: #000;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 18px;
+      font-family: 'Courier New', monospace;
+    }
+    
+    .instruction {
+      font-size: 13px;
+      color: #888;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <video id="cameraFeed" autoplay muted playsinline style="display: none;"></video>
+  <canvas id="pixelCanvas"></canvas>
+  
+  <div id="ui">
+    <div>SCORE: <span id="score">0</span></div>
+    <div>SPEED: <span id="speed">0</span> km/h</div>
+    <div>FUEL: <span id="fuel">100</span>%</div>
+  </div>
+  
+  <div id="status">
+    <div id="statusText">カメラを起動してください</div>
+    <div class="instruction">体を左右に傾けて操作！前傾でスピードアップ！</div>
+  </div>
+  
+  <button id="cameraBtn" class="control-btn">START</button>
+  <button id="startBtn" class="control-btn" style="display: none;">RACE!</button>
+  
+  <div id="gameOver">
+    <h2>GAME OVER</h2>
+    <p>SCORE: <span id="finalScore">0</span></p>
+    <p>DISTANCE: <span id="finalDistance">0</span> km</p>
+    <button id="restartBtn">RETRY</button>
+  </div>
+
+  <script type="module">
+    import { PoseLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const video = document.getElementById('cameraFeed');
+    const pixelCanvas = document.getElementById('pixelCanvas');
+    const pixelCtx = pixelCanvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const speedEl = document.getElementById('speed');
+    const fuelEl = document.getElementById('fuel');
+    const statusText = document.getElementById('statusText');
+    const cameraBtn = document.getElementById('cameraBtn');
+    const startBtn = document.getElementById('startBtn');
+    const gameOverDiv = document.getElementById('gameOver');
+    const finalScoreEl = document.getElementById('finalScore');
+    const finalDistanceEl = document.getElementById('finalDistance');
+    const restartBtn = document.getElementById('restartBtn');
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    const pixelWidth = 24;
+    const pixelHeight = 18;
+    pixelCanvas.width = 180;
+    pixelCanvas.height = 135;
+    pixelCtx.imageSmoothingEnabled = false;
+
+    let poseLandmarker = null;
+    let cameraReady = false;
+    let gameRunning = false;
+    let animationId = null;
+
+    // ゲーム状態
+    let score = 0;
+    let distance = 0;
+    let speed = 0;
+    let fuel = 100;
+    let roadOffset = 0;
+    let playerX = canvas.width / 2;
+    let targetSpeed = 0;
+
+    const ROAD_WIDTH = 400;
+    const CAR_WIDTH = 40;
+    const CAR_HEIGHT = 70;
+    
+    let obstacles = [];
+    let roadLines = [];
+    let trees = [];
+
+    // プレイヤー姿勢
+    let playerTilt = 0; // -1 (左) ~ 1 (右)
+    let playerLean = 0; // 0 (直立) ~ 1 (前傾)
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    function playEngineSound(frequency) {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.1);
+    }
+
+    function playCrashSound() {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const noise = audioCtx.createBufferSource();
+      const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.3, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < buffer.length; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      noise.buffer = buffer;
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      noise.connect(gain);
+      gain.connect(audioCtx.destination);
+      noise.start();
+    }
+
+    class Obstacle {
+      constructor() {
+        const roadCenter = canvas.width / 2;
+        const roadLeft = roadCenter - ROAD_WIDTH / 2;
+        const roadRight = roadCenter + ROAD_WIDTH / 2;
+        
+        this.x = roadLeft + Math.random() * (ROAD_WIDTH - 50);
+        this.y = -100;
+        this.width = 40;
+        this.height = 60;
+        this.type = Math.random() > 0.5 ? 'car' : 'cone';
+        this.color = this.type === 'car' ? '#ff0000' : '#ff9900';
+      }
+
+      update(speedDelta) {
+        this.y += speedDelta;
+        return this.y < canvas.height + 100;
+      }
+
+      draw() {
+        if (this.type === 'car') {
+          // 敵車
+          ctx.fillStyle = this.color;
+          ctx.fillRect(this.x, this.y, this.width, this.height);
+          ctx.fillStyle = '#000';
+          ctx.fillRect(this.x + 5, this.y + 10, this.width - 10, 20);
+          ctx.fillStyle = '#ffff00';
+          ctx.fillRect(this.x + 5, this.y + this.height - 10, 10, 8);
+          ctx.fillRect(this.x + this.width - 15, this.y + this.height - 10, 10, 8);
+        } else {
+          // コーン
+          ctx.fillStyle = this.color;
+          ctx.beginPath();
+          ctx.moveTo(this.x + this.width / 2, this.y);
+          ctx.lineTo(this.x, this.y + this.height);
+          ctx.lineTo(this.x + this.width, this.y + this.height);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      }
+    }
+
+    class Tree {
+      constructor(side) {
+        this.x = side === 'left' ? 
+          canvas.width / 2 - ROAD_WIDTH / 2 - 50 - Math.random() * 100 :
+          canvas.width / 2 + ROAD_WIDTH / 2 + 50 + Math.random() * 100;
+        this.y = -50;
+        this.size = 30 + Math.random() * 20;
+      }
+
+      update(speedDelta) {
+        this.y += speedDelta;
+        return this.y < canvas.height + 50;
+      }
+
+      draw() {
+        ctx.fillStyle = '#228b22';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#654321';
+        ctx.fillRect(this.x - 5, this.y, 10, this.size);
+      }
+    }
+
+    function renderPixelatedCamera() {
+      if (video.readyState >= 2) {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = pixelWidth;
+        tempCanvas.height = pixelHeight;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.imageSmoothingEnabled = false;
+        tempCtx.drawImage(video, 0, 0, pixelWidth, pixelHeight);
+        pixelCtx.clearRect(0, 0, pixelCanvas.width, pixelCanvas.height);
+        pixelCtx.imageSmoothingEnabled = false;
+        pixelCtx.drawImage(tempCanvas, 0, 0, pixelCanvas.width, pixelCanvas.height);
+      }
+      requestAnimationFrame(renderPixelatedCamera);
+    }
+
+    async function initCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: 640, height: 480 },
+          audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+        cameraReady = true;
+        statusText.textContent = 'モデル読み込み中...';
+        cameraBtn.style.display = 'none';
+        renderPixelatedCamera();
+        await initPoseLandmarker();
+      } catch (e) {
+        console.error('Camera error:', e);
+        statusText.textContent = 'カメラエラー';
+      }
+    }
+
+    async function initPoseLandmarker() {
+      try {
+        const vision = await FilesetResolver.forVisionTasks(
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+        );
+        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+            delegate: 'GPU'
+          },
+          runningMode: 'VIDEO',
+          numPoses: 1
+        });
+        statusText.textContent = '準備OK！レース開始！';
+        startBtn.style.display = 'block';
+        poseLoop();
+      } catch (e) {
+        console.error('Model error:', e);
+        statusText.textContent = 'モデルエラー';
+      }
+    }
+
+    function poseLoop() {
+      if (!poseLandmarker || video.readyState < 2) {
+        requestAnimationFrame(poseLoop);
+        return;
+      }
+
+      try {
+        const now = performance.now();
+        const results = poseLandmarker.detectForVideo(video, now);
+
+        if (results.landmarks && results.landmarks.length > 0) {
+          const landmarks = results.landmarks[0];
+          
+          const leftShoulder = landmarks[11];
+          const rightShoulder = landmarks[12];
+          const nose = landmarks[0];
+          const leftHip = landmarks[23];
+          const rightHip = landmarks[24];
+
+          if (leftShoulder && rightShoulder && nose) {
+            // 左右の傾き検出
+            const shoulderTilt = leftShoulder.y - rightShoulder.y;
+            playerTilt = Math.max(-1, Math.min(1, shoulderTilt * 3));
+
+            // 前傾姿勢検出（鼻とヒップの位置関係）
+            if (leftHip && rightHip) {
+              const hipCenter = (leftHip.y + rightHip.y) / 2;
+              const lean = (hipCenter - nose.y) / 0.5; // 正規化
+              playerLean = Math.max(0, Math.min(1, lean - 0.3));
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Pose detection error:', e);
+      }
+
+      requestAnimationFrame(poseLoop);
+    }
+
+    function startGame() {
+      gameRunning = true;
+      score = 0;
+      distance = 0;
+      speed = 0;
+      fuel = 100;
+      obstacles = [];
+      trees = [];
+      roadLines = [];
+      playerX = canvas.width / 2;
+      roadOffset = 0;
+      gameOverDiv.style.display = 'none';
+      startBtn.style.display = 'none';
+      statusText.textContent = '体を傾けてハンドル操作！';
+      
+      for (let i = 0; i < 10; i++) {
+        roadLines.push({ y: i * 100 });
+      }
+      
+      gameLoop();
+    }
+
+    function endGame() {
+      gameRunning = false;
+      finalScoreEl.textContent = score;
+      finalDistanceEl.textContent = (distance / 1000).toFixed(1);
+      gameOverDiv.style.display = 'block';
+      if (animationId) cancelAnimationFrame(animationId);
+    }
+
+    function gameLoop() {
+      if (!gameRunning) return;
+
+      ctx.fillStyle = '#2d5016';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // スピード計算（前傾姿勢でスピードアップ）
+      targetSpeed = 5 + playerLean * 15;
+      speed += (targetSpeed - speed) * 0.1;
+      
+      // 燃料消費
+      fuel -= speed * 0.001;
+      if (fuel <= 0) {
+        fuel = 0;
+        endGame();
+        return;
+      }
+
+      distance += speed;
+      score = Math.floor(distance / 10);
+      
+      speedEl.textContent = Math.floor(speed * 10);
+      scoreEl.textContent = score;
+      fuelEl.textContent = Math.floor(fuel);
+
+      // プレイヤー位置更新（体の傾きで移動）
+      const roadCenter = canvas.width / 2;
+      const maxMove = ROAD_WIDTH / 2 - CAR_WIDTH / 2;
+      playerX = roadCenter + playerTilt * maxMove;
+
+      // 道路オフセット
+      roadOffset += speed;
+      if (roadOffset > 100) roadOffset = 0;
+
+      // 道路描画
+      ctx.fillStyle = '#333';
+      ctx.fillRect(roadCenter - ROAD_WIDTH / 2, 0, ROAD_WIDTH, canvas.height);
+
+      // 中央線
+      ctx.strokeStyle = '#ffff00';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([20, 20]);
+      roadLines.forEach(line => {
+        line.y += speed;
+        if (line.y > canvas.height) line.y = -100;
+        ctx.beginPath();
+        ctx.moveTo(roadCenter, line.y);
+        ctx.lineTo(roadCenter, line.y + 40);
+        ctx.stroke();
+      });
+      ctx.setLineDash([]);
+
+      // 路肩線
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(roadCenter - ROAD_WIDTH / 2, 0);
+      ctx.lineTo(roadCenter - ROAD_WIDTH / 2, canvas.height);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(roadCenter + ROAD_WIDTH / 2, 0);
+      ctx.lineTo(roadCenter + ROAD_WIDTH / 2, canvas.height);
+      ctx.stroke();
+
+      // 木の更新
+      trees = trees.filter(t => {
+        const alive = t.update(speed);
+        if (alive) t.draw();
+        return alive;
+      });
+
+      if (Math.random() < 0.03) {
+        trees.push(new Tree(Math.random() > 0.5 ? 'left' : 'right'));
+      }
+
+      // 障害物更新
+      obstacles = obstacles.filter(o => {
+        const alive = o.update(speed);
+        if (alive) o.draw();
+        
+        // 衝突判定
+        const playerY = canvas.height - 150;
+        if (o.y > playerY - o.height && o.y < playerY + CAR_HEIGHT) {
+          if (Math.abs(o.x - playerX) < CAR_WIDTH) {
+            playCrashSound();
+            fuel -= 20;
+            return false;
+          }
+        }
+        
+        return alive;
+      });
+
+      if (Math.random() < 0.02) {
+        obstacles.push(new Obstacle());
+      }
+
+      // プレイヤーカー描画
+      const playerY = canvas.height - 150;
+      
+      // 傾き表現
+      ctx.save();
+      ctx.translate(playerX + CAR_WIDTH / 2, playerY + CAR_HEIGHT / 2);
+      ctx.rotate(playerTilt * 0.2);
+      
+      ctx.fillStyle = '#00ff00';
+      ctx.fillRect(-CAR_WIDTH / 2, -CAR_HEIGHT / 2, CAR_WIDTH, CAR_HEIGHT);
+      
+      // 窓
+      ctx.fillStyle = '#003300';
+      ctx.fillRect(-CAR_WIDTH / 2 + 5, -CAR_HEIGHT / 2 + 10, CAR_WIDTH - 10, 20);
+      
+      // ヘッドライト
+      ctx.fillStyle = '#ffff00';
+      ctx.fillRect(-CAR_WIDTH / 2 + 5, -CAR_HEIGHT / 2 + 5, 10, 8);
+      ctx.fillRect(CAR_WIDTH / 2 - 15, -CAR_HEIGHT / 2 + 5, 10, 8);
+      
+      ctx.restore();
+
+      // エンジン音
+      if (Math.random() < 0.1) {
+        playEngineSound(100 + speed * 10);
+      }
+
+      animationId = requestAnimationFrame(gameLoop);
+    }
+
+    cameraBtn.addEventListener('click', initCamera);
+    startBtn.addEventListener('click', startGame);
+    restartBtn.addEventListener('click', startGame);
+
+    window.addEventListener('resize', () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    });
+  </script>
+</body>
+</html>
