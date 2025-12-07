@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>モーションシューター</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: linear-gradient(135deg, #0a0e27, #1a1f3a);
+      color: #fff;
+      font-family: 'Arial', sans-serif;
+      overflow: hidden;
+      height: 100vh;
+    }
+    
+    #gameCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at center, #0f1629, #050812);
+    }
+    
+    #cameraFeed {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 240px;
+      height: 180px;
+      border: 3px solid rgba(78, 240, 192, 0.6);
+      border-radius: 12px;
+      object-fit: cover;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+      z-index: 100;
+      image-rendering: pixelated;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: crisp-edges;
+      filter: contrast(1.2) saturate(1.3);
+    }
+    
+    #pixelCanvas {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 240px;
+      height: 180px;
+      border: 3px solid rgba(78, 240, 192, 0.6);
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+      z-index: 101;
+      image-rendering: pixelated;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: crisp-edges;
+    }
+    
+    #ui {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 100;
+      font-size: 24px;
+      text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.8);
+    }
+    
+    #status {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 15px 30px;
+      border-radius: 12px;
+      text-align: center;
+      backdrop-filter: blur(10px);
+    }
+    
+    .control-btn {
+      position: absolute;
+      bottom: 20px;
+      padding: 15px 30px;
+      background: linear-gradient(135deg, #4ef0c0, #34b3ff);
+      border: none;
+      border-radius: 12px;
+      color: #000;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 16px;
+      box-shadow: 0 6px 20px rgba(78, 240, 192, 0.4);
+      transition: transform 0.1s;
+      z-index: 100;
+    }
+    
+    .control-btn:hover {
+      transform: translateY(-2px);
+    }
+    
+    .control-btn:active {
+      transform: translateY(0);
+    }
+    
+    #cameraBtn {
+      right: 20px;
+    }
+    
+    #startBtn {
+      left: 20px;
+    }
+    
+    .health-bar {
+      width: 200px;
+      height: 20px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+    
+    .health-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #ff4757, #ff6b9a);
+      transition: width 0.3s;
+    }
+    
+    #gameOver {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.9);
+      padding: 40px 60px;
+      border-radius: 20px;
+      text-align: center;
+      display: none;
+      z-index: 200;
+    }
+    
+    #gameOver h2 {
+      font-size: 48px;
+      color: #ff4757;
+      margin-bottom: 20px;
+    }
+    
+    #gameOver p {
+      font-size: 24px;
+      margin: 10px 0;
+    }
+    
+    #restartBtn {
+      margin-top: 30px;
+      padding: 15px 40px;
+      background: linear-gradient(135deg, #4ef0c0, #34b3ff);
+      border: none;
+      border-radius: 12px;
+      color: #000;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 18px;
+    }
+    
+    .instruction {
+      font-size: 14px;
+      color: #aaa;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <video id="cameraFeed" autoplay muted playsinline style="display: none;"></video>
+  <canvas id="pixelCanvas"></canvas>
+  
+  <div id="ui">
+    <div>スコア: <span id="score">0</span></div>
+    <div>HP: <span id="hp">100</span></div>
+    <div class="health-bar">
+      <div class="health-fill" id="healthFill" style="width: 100%"></div>
+    </div>
+  </div>
+  
+  <div id="status">
+    <div id="statusText">カメラを起動してください</div>
+    <div class="instruction">両手を伸ばして攻撃！体を左右に動かして移動！</div>
+  </div>
+  
+  <button id="cameraBtn" class="control-btn">カメラ起動</button>
+  <button id="startBtn" class="control-btn" style="display: none;">ゲーム開始</button>
+  
+  <div id="gameOver">
+    <h2>GAME OVER</h2>
+    <p>スコア: <span id="finalScore">0</span></p>
+    <button id="restartBtn">もう一度プレイ</button>
+  </div>
+
+  <script type="module">
+    import { PoseLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const video = document.getElementById('cameraFeed');
+    const pixelCanvas = document.getElementById('pixelCanvas');
+    const pixelCtx = pixelCanvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const hpEl = document.getElementById('hp');
+    const healthFill = document.getElementById('healthFill');
+    const statusText = document.getElementById('statusText');
+    const cameraBtn = document.getElementById('cameraBtn');
+    const startBtn = document.getElementById('startBtn');
+    const gameOverDiv = document.getElementById('gameOver');
+    const finalScoreEl = document.getElementById('finalScore');
+    const restartBtn = document.getElementById('restartBtn');
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    // ピクセルアート用の超低解像度キャンバス
+    const pixelWidth = 30; // 30ピクセル幅（超粗い）
+    const pixelHeight = 22; // アスペクト比維持
+    pixelCanvas.width = 240;
+    pixelCanvas.height = 180;
+    
+    // ピクセル化を強制
+    pixelCtx.imageSmoothingEnabled = false;
+
+    let poseLandmarker = null;
+    let cameraReady = false;
+    let gameRunning = false;
+    let animationId = null;
+
+    // ゲーム状態
+    let score = 0;
+    let hp = 100;
+    let player = { x: canvas.width / 2, y: canvas.height - 100, width: 40, height: 60 };
+    let bullets = [];
+    let enemies = [];
+    let particles = [];
+    let lastShootTime = 0;
+    let lastPoseCheck = 0;
+
+    // プレイヤーの位置（体の中心の正規化座標）
+    let playerNormalizedX = 0.5;
+
+    // 音声コンテキスト
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    function playShootSound() {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.1);
+    }
+
+    function playHitSound() {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.2);
+    }
+
+    class Bullet {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.width = 8;
+        this.height = 20;
+        this.speed = 15;
+        this.color = '#4ef0c0';
+      }
+
+      update() {
+        this.y -= this.speed;
+        return this.y > -this.height;
+      }
+
+      draw() {
+        ctx.fillStyle = this.color;
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = this.color;
+        ctx.fillRect(this.x - this.width / 2, this.y, this.width, this.height);
+        ctx.shadowBlur = 0;
+      }
+    }
+
+    class Enemy {
+      constructor() {
+        this.x = Math.random() * canvas.width;
+        this.y = -50;
+        this.width = 40;
+        this.height = 40;
+        this.speed = 2 + Math.random() * 3;
+        this.color = '#ff4757';
+      }
+
+      update() {
+        this.y += this.speed;
+        return this.y < canvas.height + 50;
+      }
+
+      draw() {
+        ctx.fillStyle = this.color;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.width / 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // 目
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(this.x - 10, this.y - 5, 5, 0, Math.PI * 2);
+        ctx.arc(this.x + 10, this.y - 5, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    class Particle {
+      constructor(x, y, color) {
+        this.x = x;
+        this.y = y;
+        this.vx = (Math.random() - 0.5) * 8;
+        this.vy = (Math.random() - 0.5) * 8;
+        this.life = 1;
+        this.color = color;
+        this.size = Math.random() * 6 + 2;
+      }
+
+      update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life -= 0.02;
+        this.size *= 0.96;
+        return this.life > 0;
+      }
+
+      draw() {
+        ctx.globalAlpha = this.life;
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    function spawnExplosion(x, y, color, count = 20) {
+      for (let i = 0; i < count; i++) {
+        particles.push(new Particle(x, y, color));
+      }
+    }
+
+    function checkCollision(rect1, rect2) {
+      return rect1.x < rect2.x + rect2.width &&
+             rect1.x + rect1.width > rect2.x &&
+             rect1.y < rect2.y + rect2.height &&
+             rect1.y + rect1.height > rect2.y;
+    }
+
+    async function initCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: 640, height: 480 },
+          audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+        cameraReady = true;
+        statusText.textContent = 'ポーズ検出を初期化中...';
+        cameraBtn.style.display = 'none';
+        renderPixelatedCamera(); // ピクセル化レンダリング開始
+        await initPoseLandmarker();
+      } catch (e) {
+        console.error('Camera error:', e);
+        statusText.textContent = 'カメラエラー';
+      }
+    }
+
+    async function initPoseLandmarker() {
+      try {
+        const vision = await FilesetResolver.forVisionTasks(
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+        );
+        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+            delegate: 'GPU'
+          },
+          runningMode: 'VIDEO',
+          numPoses: 1
+        });
+        statusText.textContent = '準備完了！ゲームを開始してください';
+        startBtn.style.display = 'block';
+        poseLoop();
+      } catch (e) {
+        console.error('Model error:', e);
+        statusText.textContent = 'モデル読み込みエラー';
+      }
+    }
+
+    let leftArmExtended = false;
+    let rightArmExtended = false;
+    let bothArmsExtendedTime = 0;
+    
+    // ピクセル化レンダリング
+    function renderPixelatedCamera() {
+      if (video.readyState >= 2) {
+        // 一時的な超低解像度キャンバスに描画
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = pixelWidth;
+        tempCanvas.height = pixelHeight;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.imageSmoothingEnabled = false;
+        
+        // ビデオを超低解像度に縮小
+        tempCtx.drawImage(video, 0, 0, pixelWidth, pixelHeight);
+        
+        // それを拡大して表示
+        pixelCtx.clearRect(0, 0, pixelCanvas.width, pixelCanvas.height);
+        pixelCtx.imageSmoothingEnabled = false;
+        pixelCtx.drawImage(tempCanvas, 0, 0, pixelCanvas.width, pixelCanvas.height);
+      }
+      requestAnimationFrame(renderPixelatedCamera);
+    }
+
+    function poseLoop() {
+      if (!poseLandmarker || video.readyState < 2) {
+        requestAnimationFrame(poseLoop);
+        return;
+      }
+
+      try {
+        const now = performance.now();
+        const results = poseLandmarker.detectForVideo(video, now);
+
+        if (results.landmarks && results.landmarks.length > 0) {
+          const landmarks = results.landmarks[0];
+          
+          // 体の中心位置を計算（左右の肩の中間点）
+          const leftShoulder = landmarks[11];
+          const rightShoulder = landmarks[12];
+          if (leftShoulder && rightShoulder) {
+            playerNormalizedX = (leftShoulder.x + rightShoulder.x) / 2;
+            player.x = (1 - playerNormalizedX) * canvas.width; // 反転
+          }
+
+          // 腕の伸展検出
+          const leftWrist = landmarks[15];
+          const leftElbow = landmarks[13];
+          const rightWrist = landmarks[16];
+          const rightElbow = landmarks[14];
+
+          // 左腕の伸び
+          if (leftWrist && leftShoulder && leftElbow) {
+            const armLength = Math.hypot(leftWrist.x - leftShoulder.x, leftWrist.y - leftShoulder.y);
+            const shoulderToElbow = Math.hypot(leftElbow.x - leftShoulder.x, leftElbow.y - leftShoulder.y);
+            leftArmExtended = armLength > shoulderToElbow * 1.4 && leftWrist.z < leftShoulder.z - 0.1;
+          }
+
+          // 右腕の伸び
+          if (rightWrist && rightShoulder && rightElbow) {
+            const armLength = Math.hypot(rightWrist.x - rightShoulder.x, rightWrist.y - rightShoulder.y);
+            const shoulderToElbow = Math.hypot(rightElbow.x - rightShoulder.x, rightElbow.y - rightShoulder.y);
+            rightArmExtended = armLength > shoulderToElbow * 1.4 && rightWrist.z < rightShoulder.z - 0.1;
+          }
+
+          // 両手を前に伸ばしたら連射モード
+          if (gameRunning && (leftArmExtended || rightArmExtended)) {
+            if (now - lastShootTime > 100) { // 100ms間隔で発射
+              bullets.push(new Bullet(player.x + player.width / 2, player.y));
+              playShootSound();
+              lastShootTime = now;
+              spawnExplosion(player.x + player.width / 2, player.y, '#4ef0c0', 5);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Pose detection error:', e);
+      }
+
+      requestAnimationFrame(poseLoop);
+    }
+
+    function startGame() {
+      gameRunning = true;
+      score = 0;
+      hp = 100;
+      bullets = [];
+      enemies = [];
+      particles = [];
+      player.x = canvas.width / 2;
+      gameOverDiv.style.display = 'none';
+      startBtn.style.display = 'none';
+      statusText.textContent = '両手を前に伸ばして攻撃！';
+      gameLoop();
+    }
+
+    function endGame() {
+      gameRunning = false;
+      finalScoreEl.textContent = score;
+      gameOverDiv.style.display = 'block';
+      if (animationId) cancelAnimationFrame(animationId);
+    }
+
+    function gameLoop() {
+      if (!gameRunning) return;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // 背景の星
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      for (let i = 0; i < 100; i++) {
+        const x = (i * 137.5) % canvas.width;
+        const y = (i * 73.3 + performance.now() * 0.1) % canvas.height;
+        ctx.fillRect(x, y, 2, 2);
+      }
+
+      // プレイヤー描画
+      ctx.fillStyle = '#4ef0c0';
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = '#4ef0c0';
+      ctx.beginPath();
+      ctx.moveTo(player.x + player.width / 2, player.y);
+      ctx.lineTo(player.x, player.y + player.height);
+      ctx.lineTo(player.x + player.width, player.y + player.height);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // 攻撃モード表示
+      if (leftArmExtended || rightArmExtended) {
+        ctx.strokeStyle = '#ff6b9a';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(player.x + player.width / 2, player.y, 50, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // 弾丸更新
+      bullets = bullets.filter(b => {
+        const alive = b.update();
+        if (alive) b.draw();
+        return alive;
+      });
+
+      // 敵更新
+      enemies = enemies.filter(e => {
+        const alive = e.update();
+        if (alive) e.draw();
+        
+        // 弾との衝突判定
+        for (let i = bullets.length - 1; i >= 0; i--) {
+          const b = bullets[i];
+          if (Math.hypot(b.x - e.x, b.y - e.y) < e.width / 2) {
+            bullets.splice(i, 1);
+            score += 10;
+            scoreEl.textContent = score;
+            spawnExplosion(e.x, e.y, '#ff4757');
+            playHitSound();
+            return false;
+          }
+        }
+
+        // プレイヤーとの衝突
+        if (e.y > player.y && Math.abs(e.x - player.x - player.width / 2) < 30) {
+          hp -= 10;
+          hpEl.textContent = hp;
+          healthFill.style.width = hp + '%';
+          spawnExplosion(player.x + player.width / 2, player.y + player.height / 2, '#ff4757', 30);
+          playHitSound();
+          if (hp <= 0) {
+            endGame();
+          }
+          return false;
+        }
+
+        return alive;
+      });
+
+      // パーティクル更新
+      particles = particles.filter(p => {
+        const alive = p.update();
+        if (alive) p.draw();
+        return alive;
+      });
+
+      // 敵生成
+      if (Math.random() < 0.02) {
+        enemies.push(new Enemy());
+      }
+
+      animationId = requestAnimationFrame(gameLoop);
+    }
+
+    cameraBtn.addEventListener('click', initCamera);
+    startBtn.addEventListener('click', startGame);
+    restartBtn.addEventListener('click', startGame);
+
+    window.addEventListener('resize', () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    });
+  </script>
+</body>
+</html>
